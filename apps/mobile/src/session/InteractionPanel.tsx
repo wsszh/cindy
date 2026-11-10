@@ -1,4 +1,6 @@
 import type { ScrollViewInstance } from 'react-native';
+import { IssueConfirmCard, type MobileIssueConfirmRequest } from './IssueConfirmCard';
+import { clearIssueConfirmDraft } from './interactionDraftStore';
 import { askAnswerError, askQuestionOptions, interactionPriority } from '@cindy/maker-shared/interaction';
 import { deviceDisplayName } from '@/device-link/deviceName';
 import { PluginSetupNativeActions } from '@/plugins/PluginSetupNativeActions';
@@ -371,9 +373,9 @@ function InteractionPanelContent({
     );
   }
   return (
-    <View style={[styles.root, fillAvailableHeight && styles.rootFill, rootLayoutStyle]} testID="interaction.panel">
-      {/* 代输入条自带用途与位置,单独一条时不再叠一层队列头。 */}
-      {kind === 'input_handoff' && activeQueuePresentation.totalCount <= 1 ? null : (
+    <View style={[styles.root, kind === 'issue_confirm' && activeInteraction.request.remoteConfirmSupported === true && styles.selfContainedCard, fillAvailableHeight && styles.rootFill, rootLayoutStyle]} testID="interaction.panel">
+      {/* 代输入与反馈自带说明；单条反馈的收起入口并入卡片，不重复队列标题。 */}
+      {activeQueuePresentation.totalCount <= 1 && (kind === 'input_handoff' || (kind === 'issue_confirm' && activeInteraction.request.remoteConfirmSupported === true)) ? null : (
         <PendingTaskHeader
           onCollapse={canToggleCollapsed ? toggleCollapsed : undefined}
           onSelectRequest={setActiveRequestId}
@@ -386,10 +388,12 @@ function InteractionPanelContent({
         deviceId={deviceId}
         sessionId={sessionId}
         item={activeInteraction}
+        embedded={embedded}
         planViewerState={planViewerState}
         onPlanViewerStateChange={onPlanViewerStateChange}
         onError={onError}
         touchLayout={touchLayout}
+        onCollapse={kind === 'issue_confirm' && activeQueuePresentation.totalCount <= 1 && canToggleCollapsed ? toggleCollapsed : undefined}
       />
     </View>
   );
@@ -534,18 +538,22 @@ function InteractionItem({
   deviceId,
   sessionId,
   item,
+  embedded,
   planViewerState,
   onPlanViewerStateChange,
   onError,
   touchLayout,
+  onCollapse,
 }: {
   deviceId: string;
   sessionId: string;
   item: PendingInteraction;
+  embedded: boolean;
   planViewerState?: MobilePlanViewerState;
   onPlanViewerStateChange?(state: MobilePlanViewerState): void;
   onError(message: string | null): void;
   touchLayout: InteractionTouchLayout;
+  onCollapse?(): void;
 }) {
   const { t } = useTranslation();
   const maker = useMobileMakerTransport(deviceId);
@@ -630,6 +638,7 @@ function InteractionItem({
       remoteSessionStore.releaseProtectedQuestion(sessionId, currentRequestId);
       if (kind === 'ask_user_question') clearAskUserDraft(currentRequestId);
       if (kind === 'plan_review') clearPlanReviewDraft(currentRequestId);
+      if (kind === 'issue_confirm') clearIssueConfirmDraft(currentRequestId);
       if (optimisticDismiss) {
         remoteSessionStore.settleOptimisticInteractionDismiss(sessionId, currentRequestId, { kind: 'confirmed' });
       } else if (options.resolvedRevision !== undefined) {
@@ -714,6 +723,10 @@ function InteractionItem({
         touchLayout={touchLayout}
       />
     );
+  }
+  if (kind === 'issue_confirm' && item.request.remoteConfirmSupported === true && !isSharedTaskPeer(deviceId)) {
+    return <IssueConfirmCard key={requestId} request={item.request as unknown as MobileIssueConfirmRequest}
+      busy={busy} inline={embedded} onCollapse={onCollapse} onDecision={(decision) => void submitDecision(decision)} />;
   }
   if (kind === 'issue_confirm' || kind === 'rename_sessions_confirm' || kind === 'ghost_grant_confirm') {
     return (
@@ -2191,6 +2204,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   companionFactValue: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: typeScale.footnote, lineHeight: lineHeight.caption },
   companionDetailsButton: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'flex-start' },
   root: {
+    flexShrink: 1,
     borderBottomColor: colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
@@ -2201,6 +2215,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  selfContainedCard: { borderBottomWidth: 0 },
   taskHeaderWrap: {
     gap: spacing.xs,
   },
